@@ -2,7 +2,7 @@ SRC = $(wildcard *.c)
 OBJ = $(SRC:.c=.o)
 
 CFLAGS = -Werror -Wall
-LDFLAGS =
+LDFLAGS = -lm
 
 timer.out: $(OBJ)
 	        $(CC) $(CFLAGS) -o $@ $^ $(LDFLAGS)
