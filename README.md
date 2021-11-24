@@ -86,5 +86,67 @@ All in all, between those two, `getcycles` seems a better option when `constant_
 # vDSO is the new mechanism used nowadays
 ffffffffff600000-ffffffffff601000 r-xp 00000000 00:00 0                  [vsyscall]
 ```
-Explaining every line:
 
+(b) Explaining the additional regions we can find for systemd-journal:
+
+We can see that the binary has a bigger .rodata section, so it's separately mapped:
+```
+56090ebe1000-56090ebe9000 r--p 0001e000 08:05 2234586                    /usr/lib/systemd/systemd-journald
+56090ebe9000-56090ebeb000 r--p 00025000 08:05 2234586                    /usr/lib/systemd/systemd-journald
+```
+
+We can find some memory-backed shared memory segments (A file multiple processes open and mmap a shared view): 
+```
+7faa40307000-7faa40b07000 rw-s 00000000 08:05 1589602                    /var/log/journal/a6b5310522aa43228fec8389a0c806b4/user-1000.journal
+...
+7faa41308000-7faa41b08000 rw-s 00000000 08:05 1583100                    /var/log/journal/a6b5310522aa43228fec8389a0c806b4/system.journal
+...
+7faa42f8f000-7faa42f90000 rw-s 00000000 00:18 296                        /run/systemd/journal/kernel-seqnum
+```
+
+We can also see many additional shared objects:
+```
+7faa42a6f000-7faa42a71000 r--p 00000000 08:05 2234956                    /usr/lib/x86_64-linux-gnu/libcap.so.2.32
+7faa42a71000-7faa42a74000 r-xp 00002000 08:05 2234956                    /usr/lib/x86_64-linux-gnu/libcap.so.2.32
+7faa42a74000-7faa42a75000 r--p 00005000 08:05 2234956                    /usr/lib/x86_64-linux-gnu/libcap.so.2.32
+7faa42a75000-7faa42a76000 ---p 00006000 08:05 2234956                    /usr/lib/x86_64-linux-gnu/libcap.so.2.32
+7faa42a76000-7faa42a77000 r--p 00006000 08:05 2234956                    /usr/lib/x86_64-linux-gnu/libcap.so.2.32
+7faa42a77000-7faa42a78000 rw-p 00007000 08:05 2234956                    /usr/lib/x86_64-linux-gnu/libcap.so.2.32
+7faa42a78000-7faa42a82000 r--p 00000000 08:05 2234912                    /usr/lib/x86_64-linux-gnu/libblkid.so.1.1.0
+7faa42a82000-7faa42ab8000 r-xp 0000a000 08:05 2234912                    /usr/lib/x86_64-linux-gnu/libblkid.so.1.1.0
+7faa42ab8000-7faa42ac8000 r--p 00040000 08:05 2234912                    /usr/lib/x86_64-linux-gnu/libblkid.so.1.1.0
+7faa42ac8000-7faa42ac9000 ---p 00050000 08:05 2234912                    /usr/lib/x86_64-linux-gnu/libblkid.so.1.1.0
+7faa42ac9000-7faa42ace000 r--p 00050000 08:05 2234912                    /usr/lib/x86_64-linux-gnu/libblkid.so.1.1.0
+7faa42ace000-7faa42acf000 rw-p 00055000 08:05 2234912                    /usr/lib/x86_64-linux-gnu/libblkid.so.1.1.0
+7faa42acf000-7faa42ad1000 r--p 00000000 08:05 2234821                    /usr/lib/x86_64-linux-gnu/libacl.so.1.1.2253
+7faa42ad1000-7faa42ad6000 r-xp 00002000 08:05 2234821                    /usr/lib/x86_64-linux-gnu/libacl.so.1.1.2253
+7faa42ad6000-7faa42ad8000 r--p 00007000 08:05 2234821                    /usr/lib/x86_64-linux-gnu/libacl.so.1.1.2253
+7faa42ad8000-7faa42ad9000 r--p 00008000 08:05 2234821                    /usr/lib/x86_64-linux-gnu/libacl.so.1.1.2253
+7faa42ad9000-7faa42ada000 rw-p 00009000 08:05 2234821                    /usr/lib/x86_64-linux-gnu/libacl.so.1.1.2253
+7faa42ada000-7faa42ae0000 r--p 00000000 08:05 2235953                    /usr/lib/x86_64-linux-gnu/libselinux.so.1
+7faa42ae0000-7faa42af9000 r-xp 00006000 08:05 2235953                    /usr/lib/x86_64-linux-gnu/libselinux.so.1
+7faa42af9000-7faa42b00000 r--p 0001f000 08:05 2235953                    /usr/lib/x86_64-linux-gnu/libselinux.so.1
+7faa42b00000-7faa42b01000 ---p 00026000 08:05 2235953                    /usr/lib/x86_64-linux-gnu/libselinux.so.1
+7faa42b01000-7faa42b02000 r--p 00026000 08:05 2235953                    /usr/lib/x86_64-linux-gnu/libselinux.so.1
+7faa42b02000-7faa42b03000 rw-p 00027000 08:05 2235953                    /usr/lib/x86_64-linux-gnu/libselinux.so.1
+```
+
+(c) We can see that the addresses change. This happens because the operating system randomizes the location of libraries in the system.
+This is a security feature that aims to make it harder for attackers predict the addresses of known and useful methods in glibc,
+and write shellcodes that exploit them, for example, but using return oriented programming (ROP) attacks.
+
+(d) We can think of vDSO as the "successor" of vsyscall.
+Both mechanisms try to avoid the overhead of context switching into the kernel when calling
+"simple" system-calls. For example, consider the systemcall "gettimeofday", all it does is read a timer from the kernel space.
+Instead of actually switching into the kernel, reading the value and returning to user-space, we can conceptually map a small memory
+region into user-space that exports both the kernel timer and a tiny piece of code to read it. Then, the user-space program don't
+really need to call the syscall using a traditional way and instead it can simply execute the mapped code snippet.
+There were two disadvantages:
+1. vsyscall only mapped four hard-coded methods
+2. vsyscall used hard-coded (constant) addresses, and made it easier for attackers to exploit them
+So, they "replaced" the vsyscall mechanism (they left it for backward compatibility by replacing the calls with traps that emulate the
+virtual syscall flow so they'll still work, but with increased latency) with the vDSO.
+The vDSO mechanism does pretty much the same thing, but only it uses dynamically allocated memory to export the virtual syscalls API
+to user-space. The kernel maps a "virtual" library into every process, and passes the address of that library in the initial
+auxiliary vector using the AT_SYSINFO_EHDR tag.
+It solves the randomization part and also allows future expansion, backward compatibility and more.
